@@ -1,12 +1,18 @@
 // Minimal Anthropic streaming provider — Phase 0 hello world.
-// Phase 5 will replace this with a real Provider abstraction (Anthropic / OpenAI / Ollama).
+// Phase 5 will replace this with a full Provider abstraction (Anthropic / OpenAI / Ollama).
 import Anthropic from "@anthropic-ai/sdk";
+import { resolveModel, resolveProvider, type ModelRole } from "../config.ts";
 
 export interface StreamOptions {
   prompt: string;
+  /** Pick a role-based default. Ignored if `model` is set. Defaults to "main". */
+  role?: ModelRole;
+  /** Explicit model id; takes precedence over role. */
   model?: string;
   maxTokens?: number;
   apiKey?: string;
+  /** Override base URL (e.g. proxy / Bedrock-compatible gateway). */
+  baseURL?: string;
   signal?: AbortSignal;
 }
 
@@ -16,23 +22,23 @@ export interface StreamEvent {
   error?: Error;
 }
 
-const DEFAULT_MODEL = "claude-sonnet-4-5";
 const DEFAULT_MAX_TOKENS = 1024;
 
 export async function* streamAnthropic(opts: StreamOptions): AsyncGenerator<StreamEvent> {
-  const apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    yield {
-      kind: "error",
-      error: new Error("ANTHROPIC_API_KEY is not set. Export it or pass apiKey."),
-    };
+  let provider;
+  try {
+    provider = resolveProvider({ apiKey: opts.apiKey, baseURL: opts.baseURL });
+  } catch (err) {
+    yield { kind: "error", error: err instanceof Error ? err : new Error(String(err)) };
     return;
   }
 
-  const client = new Anthropic({ apiKey });
+  const model = resolveModel({ role: opts.role, modelOverride: opts.model });
+  const client = new Anthropic(provider);
+
   try {
     const stream = client.messages.stream({
-      model: opts.model ?? DEFAULT_MODEL,
+      model,
       max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
       messages: [{ role: "user", content: opts.prompt }],
     });
