@@ -45,5 +45,5 @@ jobs:
       - name: Build CLI
         run: bun run --filter '@nib/cli' build
 
-      - name: Smoke-run CLI
-        run: bun run packages/cli/bin/nib
+      - name: Smoke-run CLI (--version)
+        run: bun run packages/cli/bin/nib --version

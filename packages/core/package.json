@@ -10,5 +10,8 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target bun",
     "test": "bun test"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.90.0"
   }
 }
