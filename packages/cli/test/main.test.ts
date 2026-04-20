@@ -36,9 +36,9 @@ const ENV_KEYS = [
   "ANTHROPIC_BASE_URL",
   "NIB_MODEL_MAIN",
   "NIB_MODEL_REASONING",
-  "NIB_MODEL_DEFAULT_HAIKU",
-  "NIB_MODEL_DEFAULT_SONNET",
-  "NIB_MODEL_DEFAULT_OPUS",
+  "NIB_MODEL_HAIKU",
+  "NIB_MODEL_SONNET",
+  "NIB_MODEL_OPUS",
 ] as const;
 let saved: Record<string, string | undefined> = {};
 
@@ -74,8 +74,8 @@ describe("@nib/cli main()", () => {
       const code = await main(["--help"]);
       expect(code).toBe(0);
       expect(out.get()).toContain("Usage:");
-      expect(out.get()).toContain("--role");
-      expect(out.get()).toContain("--base-url");
+      expect(out.get()).toContain("--models");
+      expect(out.get()).toContain("NIB_MODEL_MAIN");
     } finally {
       out.restore();
     }
@@ -92,26 +92,15 @@ describe("@nib/cli main()", () => {
   });
 
   it("prints models map with --models", async () => {
-    process.env["NIB_MODEL_DEFAULT_HAIKU"] = "my-haiku";
+    process.env["NIB_MODEL_HAIKU"] = "my-haiku";
     const out = captureStdout();
     try {
       const code = await main(["--models"]);
       expect(code).toBe(0);
       expect(out.get()).toMatch(/main\s+→/);
-      expect(out.get()).toMatch(/default-haiku\s+→ my-haiku/);
+      expect(out.get()).toMatch(/haiku\s+→ my-haiku/);
     } finally {
       out.restore();
-    }
-  });
-
-  it("rejects invalid --role", async () => {
-    const err = captureStderr();
-    try {
-      const code = await main(["--role", "opus", "hi"]);
-      expect(code).toBe(2);
-      expect(err.get()).toMatch(/--role/);
-    } finally {
-      err.restore();
     }
   });
 

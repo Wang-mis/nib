@@ -1,18 +1,19 @@
 // Nib runtime config — model roles + provider endpoint.
 //
-// Roles:
-//   main             — 日常对话/工具调用（活跃模型，可被任意切换）
-//   reasoning        — 复杂规划/深度思考（thinking 模式）
-//   default-haiku    — 廉价小任务/路由
-//   default-sonnet   — 默认中等模型
-//   default-opus     — 默认重型模型
+// Roles (selected per-task by callers, not at CLI startup):
+//   main       — 日常对话/工具调用（默认；未指定时回退到此）
+//   reasoning  — 复杂规划/深度思考
+//   haiku      — 廉价小任务/路由
+//   sonnet     — 中等模型
+//   opus       — 重型模型
+//
+// A skill / subagent / tool can request a specific role in its metadata
+// (e.g. `model: haiku`). If it doesn't, callers should default to "main".
 //
 // Resolution order (highest priority first):
 //   1. explicit `modelOverride` passed to resolveModel()
 //   2. env NIB_MODEL_<ROLE>   e.g. NIB_MODEL_MAIN, NIB_MODEL_REASONING,
-//                                  NIB_MODEL_DEFAULT_HAIKU,
-//                                  NIB_MODEL_DEFAULT_SONNET,
-//                                  NIB_MODEL_DEFAULT_OPUS
+//                                  NIB_MODEL_HAIKU, NIB_MODEL_SONNET, NIB_MODEL_OPUS
 //   3. built-in default
 //
 // Endpoint resolution:
@@ -20,35 +21,30 @@
 //   2. env ANTHROPIC_BASE_URL
 //   3. SDK default (https://api.anthropic.com)
 
-export type ModelRole =
-  | "main"
-  | "reasoning"
-  | "default-haiku"
-  | "default-sonnet"
-  | "default-opus";
+export type ModelRole = "main" | "reasoning" | "haiku" | "sonnet" | "opus";
 
 export const MODEL_ROLES: readonly ModelRole[] = Object.freeze([
   "main",
   "reasoning",
-  "default-haiku",
-  "default-sonnet",
-  "default-opus",
+  "haiku",
+  "sonnet",
+  "opus",
 ]);
 
 export const DEFAULT_MODELS: Readonly<Record<ModelRole, string>> = Object.freeze({
   main: "claude-sonnet-4-5",
   reasoning: "claude-opus-4-5",
-  "default-haiku": "claude-haiku-4-5",
-  "default-sonnet": "claude-sonnet-4-5",
-  "default-opus": "claude-opus-4-5",
+  haiku: "claude-haiku-4-5",
+  sonnet: "claude-sonnet-4-5",
+  opus: "claude-opus-4-5",
 });
 
 const ROLE_ENV: Readonly<Record<ModelRole, string>> = Object.freeze({
   main: "NIB_MODEL_MAIN",
   reasoning: "NIB_MODEL_REASONING",
-  "default-haiku": "NIB_MODEL_DEFAULT_HAIKU",
-  "default-sonnet": "NIB_MODEL_DEFAULT_SONNET",
-  "default-opus": "NIB_MODEL_DEFAULT_OPUS",
+  haiku: "NIB_MODEL_HAIKU",
+  sonnet: "NIB_MODEL_SONNET",
+  opus: "NIB_MODEL_OPUS",
 });
 
 export function isModelRole(value: string): value is ModelRole {
@@ -56,7 +52,9 @@ export function isModelRole(value: string): value is ModelRole {
 }
 
 export interface ResolveModelInput {
+  /** Role requested by the caller. Defaults to "main". */
   role?: ModelRole;
+  /** Explicit model id; bypasses role resolution. */
   modelOverride?: string;
 }
 

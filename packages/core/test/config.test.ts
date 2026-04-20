@@ -13,9 +13,9 @@ const ENV_KEYS = [
   "ANTHROPIC_BASE_URL",
   "NIB_MODEL_MAIN",
   "NIB_MODEL_REASONING",
-  "NIB_MODEL_DEFAULT_HAIKU",
-  "NIB_MODEL_DEFAULT_SONNET",
-  "NIB_MODEL_DEFAULT_OPUS",
+  "NIB_MODEL_HAIKU",
+  "NIB_MODEL_SONNET",
+  "NIB_MODEL_OPUS",
 ] as const;
 
 let saved: Record<string, string | undefined> = {};
@@ -40,19 +40,19 @@ describe("isModelRole", () => {
     for (const r of MODEL_ROLES) expect(isModelRole(r)).toBe(true);
   });
   it("rejects unknown values", () => {
-    expect(isModelRole("opus")).toBe(false);
-    expect(isModelRole("haiku")).toBe(false);
+    expect(isModelRole("default-haiku")).toBe(false);
+    expect(isModelRole("planner")).toBe(false);
     expect(isModelRole("")).toBe(false);
   });
 });
 
 describe("envVarForRole", () => {
-  it("uppercases and underscores the role name", () => {
+  it("uppercases the role name", () => {
     expect(envVarForRole("main")).toBe("NIB_MODEL_MAIN");
     expect(envVarForRole("reasoning")).toBe("NIB_MODEL_REASONING");
-    expect(envVarForRole("default-haiku")).toBe("NIB_MODEL_DEFAULT_HAIKU");
-    expect(envVarForRole("default-sonnet")).toBe("NIB_MODEL_DEFAULT_SONNET");
-    expect(envVarForRole("default-opus")).toBe("NIB_MODEL_DEFAULT_OPUS");
+    expect(envVarForRole("haiku")).toBe("NIB_MODEL_HAIKU");
+    expect(envVarForRole("sonnet")).toBe("NIB_MODEL_SONNET");
+    expect(envVarForRole("opus")).toBe("NIB_MODEL_OPUS");
   });
 });
 
@@ -68,9 +68,9 @@ describe("resolveModel", () => {
   });
   it("env NIB_MODEL_<ROLE> overrides default", () => {
     process.env["NIB_MODEL_REASONING"] = "my-opus";
-    process.env["NIB_MODEL_DEFAULT_HAIKU"] = "my-haiku";
+    process.env["NIB_MODEL_HAIKU"] = "my-haiku";
     expect(resolveModel({ role: "reasoning" })).toBe("my-opus");
-    expect(resolveModel({ role: "default-haiku" })).toBe("my-haiku");
+    expect(resolveModel({ role: "haiku" })).toBe("my-haiku");
   });
   it("default role is 'main'", () => {
     process.env["NIB_MODEL_MAIN"] = "main-x";
