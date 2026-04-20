@@ -1,0 +1,17 @@
+{
+  "name": "@nib/cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "nib": "./bin/nib"
+  },
+  "scripts": {
+    "build": "bun build ./src/main.tsx --outdir ./dist --target bun",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@nib/core": "workspace:*",
+    "@nib/shared": "workspace:*"
+  }
+}

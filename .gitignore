@@ -1,0 +1,32 @@
+# dependencies
+node_modules/
+.bun/
+
+# build output
+dist/
+build/
+*.tsbuildinfo
+
+# logs
+*.log
+npm-debug.log*
+
+# local Claude Code settings
+.claude/settings.local.json
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# env / secrets
+.env
+.env.*
+!.env.example
+*credentials*
+
+# nib runtime
+.nib/cache/
+.nib/sessions/
+.nib/traces/
