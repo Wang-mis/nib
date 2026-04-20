@@ -5,14 +5,20 @@
 
 ---
 
-## Phase 0 — 奠基 (Week 0, 3–5 天)
+## Phase 0 — 奠基 (Week 0, 3–5 天) ✅ 完成 (2026-04-20)
 
-| 任务 | 产出 |
-|---|---|
-| 写 `PRD.md` + `ROADMAP.md` + `ARCH.md` + `CLAUDE.md` | 项目宪法 |
-| 选型确认 + monorepo 初始化 | `bun init` + `packages/{core,cli,shared}` |
-| CI 跑通（lint + test + build） | GitHub Actions 绿 |
-| Hello World：CLI 接收输入 → 调 Claude → 流式打印 | 端到端最小通路 |
+| 任务 | 产出 | 状态 |
+|---|---|---|
+| 写 `PRD.md` + `ROADMAP.md` + `ARCH.md` + `CLAUDE.md` | 项目宪法 | ✅ |
+| 选型确认 + monorepo 初始化 | `bun init` + `packages/{core,cli,shared}` | ✅ |
+| CI 跑通（lint + test + build） | GitHub Actions 绿（ubuntu + windows 矩阵） | ✅ |
+| Hello World：CLI 接收输入 → 调 Claude → 流式打印 | 端到端最小通路 | ✅ |
+
+附加产出：
+- 5 角色模型配置（`main` / `reasoning` / `haiku` / `sonnet` / `opus`），可通过 `NIB_MODEL_<ROLE>` env 覆盖
+- 自定义 `ANTHROPIC_BASE_URL`（代理 / 网关）
+- `--models` 内省命令；CLI 主表面保持极简（启动不选模型，由 caller / skill metadata 决定）
+- 18 个单测，覆盖 config 解析与 CLI argv 解析
 
 **Tag**: `v0.0.1-hello`
 
