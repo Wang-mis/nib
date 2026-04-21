@@ -7,7 +7,7 @@
     "nib": "./bin/nib"
   },
   "scripts": {
-    "build": "bun build ./src/main.tsx --outdir ./dist --target bun",
+    "build": "bun build ./src/main.tsx --outdir ./dist --target bun --external react-devtools-core",
     "test": "bun test"
   },
   "dependencies": {
