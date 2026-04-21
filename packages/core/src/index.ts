@@ -19,3 +19,32 @@ export type {
   ResolveModelInput,
   ResolveProviderInput,
 } from "./config.ts";
+
+// Tools (Phase 1 Sprint 1)
+export {
+  ToolRegistry,
+  defaultRegistry,
+  ToolNotFoundError,
+  ToolValidationError,
+  readFileTool,
+  writeFileTool,
+  bashTool,
+  globTool,
+  readFileSchema,
+  writeFileSchema,
+  bashSchema,
+  globSchema,
+} from "./tools/index.ts";
+export type {
+  Tool,
+  ToolContext,
+  AnyTool,
+  ReadFileInput,
+  ReadFileOutput,
+  WriteFileInput,
+  WriteFileOutput,
+  BashInput,
+  BashOutput,
+  GlobInput,
+  GlobOutput,
+} from "./tools/index.ts";

@@ -28,10 +28,11 @@
 
 **目标**：AI 能读文件、改文件、跑命令。
 
-### Sprint 1：核心工具
-- 实现 4 个工具：`read_file` / `write_file` / `bash` / `glob`
-- 工具 schema + JSON Schema 校验
-- 单元测试覆盖每个工具
+### Sprint 1：核心工具 ✅ (2026-04-21)
+- 实现 4 个工具：`read_file` / `write_file` / `bash` / `glob` ✅
+- 工具 schema + JSON Schema 校验（Zod，strict mode） ✅
+- 单元测试覆盖每个工具（46 个测试，含安全策略 / 超时 / 危险命令检测） ✅
+- 不可变 `ToolRegistry`（`from` / `withTool` / `dispatch` + 输入校验）
 
 ### Sprint 2：Agent Loop + TUI
 - ReAct loop（带 tool_use / tool_result 多轮）

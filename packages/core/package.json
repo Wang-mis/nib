@@ -12,6 +12,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.90.0"
+    "@anthropic-ai/sdk": "^0.90.0",
+    "zod": "^4.3.6"
   }
 }
