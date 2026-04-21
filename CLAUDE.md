@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Hard Rules (project-wide)
+
+- **不需要考虑向后兼容，不要有历史遗留代码。** 重构时直接删除旧 API、旧 flag、旧 env 变量、旧文件、旧测试。不写 deprecation shim，不留 legacy/v1/old 命名，不保留"以防万一"的兼容分支。这是一个学习项目，源码即事实；当前实现是唯一实现。
+
 ## Project Status
 
 Nib is a **learning-first** project to clone Claude Code from scratch. As of this writing the repository is in **Phase 0 (foundation)** — there is **no code yet**, only design docs in `docs/` (`PRD.md`, `ROADMAP.md`, `ARCH.md`) and a `README.md`. Do not invent code commands; the build/test toolchain has not been initialized.

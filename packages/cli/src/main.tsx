@@ -1,6 +1,4 @@
-// @nib/cli entry — Phase 1 Sprint 2.
-// Default: ReAct agent loop with 4 tools, rendered via Ink TUI.
-// --legacy: single-shot streaming (no tools). Useful for smoke tests.
+// @nib/cli entry — ReAct agent loop with default tools, rendered via Ink TUI.
 import React from "react";
 import { render } from "ink";
 import {
@@ -9,7 +7,6 @@ import {
   MODEL_ROLES,
   envVarForRole,
   resolveModel,
-  streamAnthropic,
   VERSION,
 } from "@nib/core";
 import { App } from "./components/App.tsx";
@@ -19,7 +16,6 @@ const HELP = `nib v${VERSION}
 Usage:
   nib "<prompt>"                Run the agent with default tools (read_file,
                                 write_file, bash, glob). Renders via Ink TUI.
-  nib --legacy "<prompt>"       Single-shot text streaming (no tools).
   nib --yes "<prompt>"          Auto-approve all tool calls (DANGEROUS).
   nib --max-steps N "<prompt>"  Override step cap (default ${DEFAULT_LIMITS.maxSteps}).
   nib --help | -h               Show this help
@@ -40,11 +36,10 @@ Limits (per session):
   steps=${DEFAULT_LIMITS.maxSteps}  tokens=${DEFAULT_LIMITS.maxTokens}  cost=$${DEFAULT_LIMITS.maxCostUSD.toFixed(2)}  per-call timeout=${DEFAULT_LIMITS.perCallTimeoutMs}ms
 `;
 
-interface ParsedArgs {
+export interface ParsedArgs {
   help?: boolean;
   version?: boolean;
   models?: boolean;
-  legacy?: boolean;
   autoApprove?: boolean;
   maxSteps?: number;
   prompt: string;
@@ -64,8 +59,6 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
       out.version = true;
     } else if (a === "--models") {
       out.models = true;
-    } else if (a === "--legacy") {
-      out.legacy = true;
     } else if (a === "--yes" || a === "-y") {
       out.autoApprove = true;
     } else if (a === "--max-steps") {
@@ -93,31 +86,6 @@ function printModels(): void {
   process.stdout.write(`Resolved models:\n${lines.join("\n")}\n`);
   const baseURL = process.env["ANTHROPIC_BASE_URL"];
   if (baseURL) process.stdout.write(`Base URL: ${baseURL}\n`);
-}
-
-async function runLegacy(prompt: string): Promise<number> {
-  const controller = new AbortController();
-  const onSig = (): void => controller.abort();
-  process.on("SIGINT", onSig);
-  process.on("SIGTERM", onSig);
-
-  try {
-    let saw = false;
-    for await (const ev of streamAnthropic({ prompt, signal: controller.signal })) {
-      if (ev.kind === "text" && ev.text) {
-        process.stdout.write(ev.text);
-        saw = true;
-      } else if (ev.kind === "error") {
-        process.stderr.write(`\nnib: ${ev.error?.message ?? "unknown error"}\n`);
-        return 1;
-      }
-    }
-    if (saw) process.stdout.write("\n");
-    return 0;
-  } finally {
-    process.off("SIGINT", onSig);
-    process.off("SIGTERM", onSig);
-  }
 }
 
 async function runTui(args: ParsedArgs): Promise<number> {
@@ -156,6 +124,5 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 1;
   }
 
-  if (args.legacy) return runLegacy(args.prompt);
   return runTui(args);
 }

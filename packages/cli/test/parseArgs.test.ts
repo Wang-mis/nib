@@ -5,14 +5,7 @@ describe("parseArgs", () => {
   test("plain prompt", () => {
     const a = parseArgs(["hello", "world"]);
     expect(a.prompt).toBe("hello world");
-    expect(a.legacy).toBeUndefined();
     expect(a.autoApprove).toBeUndefined();
-  });
-
-  test("--legacy sets legacy mode", () => {
-    const a = parseArgs(["--legacy", "ping"]);
-    expect(a.legacy).toBe(true);
-    expect(a.prompt).toBe("ping");
   });
 
   test("--yes / -y sets autoApprove", () => {
