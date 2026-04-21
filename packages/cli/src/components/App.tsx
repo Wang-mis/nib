@@ -1,9 +1,9 @@
 // Ink TUI app — Phase 1 Sprint 2.
-// Renders the agent event stream: assistant text, tool_use chips, tool results,
-// and a footer showing step / token / cost. Press Ctrl+O to toggle a verbose
-// details panel that shows the full input/output payload of every tool call.
+// Renders the agent event stream inline. Each tool call is shown as a compact
+// chip by default (◌/✓/✗/⊘ name  preview); pressing Ctrl+O expands every tool
+// call in-place into a full card with input + output + duration.
 import React, { useEffect, useState } from "react";
-import { Box, Static, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
 import {
   defaultRegistry,
   runAgent,
@@ -17,11 +17,11 @@ interface AppProps {
   limits?: Partial<AgentLimits>;
 }
 
-interface LogLine {
-  id: number;
-  kind: "text" | "tool" | "tool_result" | "tool_error" | "tool_denied" | "info" | "error";
-  text: string;
-}
+type StreamItem =
+  | { kind: "text"; id: number; text: string }
+  | { kind: "info"; id: number; text: string }
+  | { kind: "error"; id: number; text: string }
+  | { kind: "tool"; id: number; toolId: string };
 
 interface ToolCallRecord {
   id: string;
@@ -73,26 +73,7 @@ function colorForStatus(status: ToolCallRecord["status"]): string {
   }
 }
 
-function colorForKind(kind: LogLine["kind"]): string {
-  switch (kind) {
-    case "tool":
-      return "cyan";
-    case "tool_result":
-      return "green";
-    case "tool_error":
-      return "red";
-    case "tool_denied":
-      return "yellow";
-    case "error":
-      return "red";
-    case "info":
-      return "gray";
-    default:
-      return "white";
-  }
-}
-
-// Picks the most identifying argument for a given tool — used in the compact chip.
+// Pick the most identifying argument for a tool — used in the compact chip.
 function chipPreview(name: string, input: unknown): string {
   if (input === null || typeof input !== "object") return "";
   const obj = input as Record<string, unknown>;
@@ -126,8 +107,6 @@ function prettyJson(v: unknown): string {
   }
 }
 
-// Renders an output preview that's easy to scan: short scalars inline,
-// long strings collapsed with line/char counts.
 function outputSummary(v: unknown): { preview: string; meta?: string } {
   if (v === undefined) return { preview: "(none)" };
   if (v === null) return { preview: "null" };
@@ -160,12 +139,12 @@ function formatDuration(ms: number): string {
 
 export function App({ prompt, autoApprove, limits }: AppProps): React.JSX.Element {
   const { exit } = useApp();
-  const [lines, setLines] = useState<readonly LogLine[]>([]);
-  const [toolCalls, setToolCalls] = useState<readonly ToolCallRecord[]>([]);
+  const [items, setItems] = useState<readonly StreamItem[]>([]);
+  const [toolsById, setToolsById] = useState<Readonly<Record<string, ToolCallRecord>>>({});
   const [status, setStatus] = useState<Status>(INITIAL_STATUS);
   const [verbose, setVerbose] = useState(false);
 
-  // Ctrl+O toggles the verbose tool-call details panel.
+  // Ctrl+O toggles the inline verbose details for every tool call.
   useInput((input, key) => {
     if (key.ctrl && (input === "o" || input === "O")) {
       setVerbose((v) => !v);
@@ -175,39 +154,31 @@ export function App({ prompt, autoApprove, limits }: AppProps): React.JSX.Elemen
   useEffect(() => {
     let nextId = 0;
     let currentStep = 0;
-    const append = (line: Omit<LogLine, "id">): void => {
+    const append = (item: Omit<StreamItem, "id">): void => {
       const id = nextId++;
-      setLines((prev) => [...prev, { ...line, id }]);
+      setItems((prev) => [...prev, { ...item, id } as StreamItem]);
     };
-    const upsertToolCall = (
+    const upsertTool = (
       id: string,
       patch: Partial<ToolCallRecord> & Pick<ToolCallRecord, "name">,
     ): void => {
-      setToolCalls((prev) => {
-        const idx = prev.findIndex((r) => r.id === id);
-        if (idx === -1) {
-          return [
-            ...prev,
-            {
+      setToolsById((prev) => {
+        const existing = prev[id];
+        const finished =
+          patch.status === "ok" || patch.status === "error" || patch.status === "denied";
+        const finishedAt = finished ? Date.now() : existing?.finishedAt;
+        const merged: ToolCallRecord = existing
+          ? { ...existing, ...patch, finishedAt }
+          : {
               id,
               step: currentStep,
               status: "pending",
               input: undefined,
               startedAt: Date.now(),
               ...patch,
-            },
-          ];
-        }
-        const next = [...prev];
-        const prevRec = next[idx]!;
-        const nowFinished =
-          patch.status === "ok" || patch.status === "error" || patch.status === "denied";
-        next[idx] = {
-          ...prevRec,
-          ...patch,
-          finishedAt: nowFinished ? Date.now() : prevRec.finishedAt,
-        };
-        return next;
+              finishedAt,
+            };
+        return { ...prev, [id]: merged };
       });
     };
 
@@ -226,7 +197,7 @@ export function App({ prompt, autoApprove, limits }: AppProps): React.JSX.Elemen
           signal: controller.signal,
         })) {
           if (ev.kind === "step_start") currentStep = ev.step;
-          handleEvent(ev, append, upsertToolCall, setStatus);
+          handleEvent(ev, append, upsertTool, setStatus);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -234,71 +205,72 @@ export function App({ prompt, autoApprove, limits }: AppProps): React.JSX.Elemen
       } finally {
         process.off("SIGINT", onSig);
         process.off("SIGTERM", onSig);
-        // Allow Ink to flush before exit
         setTimeout(() => exit(), 50);
       }
     })();
   }, [prompt, autoApprove, limits, exit]);
 
+  let toolIndex = 0;
   return (
     <Box flexDirection="column">
-      <Static items={[...lines]}>
-        {(line) => (
-          <Text key={line.id} color={colorForKind(line.kind)}>
-            {line.text}
+      {items.map((item) => {
+        if (item.kind === "tool") {
+          const rec = toolsById[item.toolId];
+          if (!rec) return null;
+          toolIndex++;
+          return verbose ? (
+            <ToolCallCard key={item.id} record={rec} index={toolIndex} />
+          ) : (
+            <ToolCallChip key={item.id} record={rec} />
+          );
+        }
+        if (item.kind === "text") {
+          return (
+            <Text key={item.id} color="white">
+              {item.text}
+            </Text>
+          );
+        }
+        if (item.kind === "error") {
+          return (
+            <Text key={item.id} color="red">
+              {item.text}
+            </Text>
+          );
+        }
+        return (
+          <Text key={item.id} color="gray">
+            {item.text}
           </Text>
-        )}
-      </Static>
-      {verbose ? <ToolDetailsPanel toolCalls={toolCalls} /> : null}
-      <Footer status={status} verbose={verbose} toolCount={toolCalls.length} />
+        );
+      })}
+      <Footer
+        status={status}
+        verbose={verbose}
+        toolCount={Object.keys(toolsById).length}
+      />
     </Box>
   );
 }
 
-function ToolDetailsPanel({
-  toolCalls,
-}: {
-  toolCalls: readonly ToolCallRecord[];
-}): React.JSX.Element {
-  const okCount = toolCalls.filter((t) => t.status === "ok").length;
-  const errCount = toolCalls.filter((t) => t.status === "error").length;
-  const denyCount = toolCalls.filter((t) => t.status === "denied").length;
-  const pendCount = toolCalls.filter((t) => t.status === "pending").length;
-
+function ToolCallChip({ record }: { record: ToolCallRecord }): React.JSX.Element {
+  const color = colorForStatus(record.status);
+  const glyph = STATUS_GLYPH[record.status];
+  const preview = chipPreview(record.name, record.input);
+  const tail =
+    record.status === "error" && record.errorMessage
+      ? `  ${truncate(record.errorMessage, 80)}`
+      : record.status === "denied"
+        ? "  denied"
+        : preview
+          ? `  ${preview}`
+          : "";
   return (
-    <Box
-      flexDirection="column"
-      marginTop={1}
-      borderStyle="round"
-      borderColor="cyan"
-      paddingX={1}
-      paddingY={0}
-    >
-      <Box>
-        <Text bold color="cyan">
-          ⚙ Tool Calls
-        </Text>
-        <Text dimColor>
-          {"  "}
-          {toolCalls.length} total
-          {okCount > 0 ? ` · ${okCount} ok` : ""}
-          {errCount > 0 ? ` · ${errCount} err` : ""}
-          {denyCount > 0 ? ` · ${denyCount} denied` : ""}
-          {pendCount > 0 ? ` · ${pendCount} pending` : ""}
-        </Text>
-      </Box>
-      {toolCalls.length === 0 ? (
-        <Box marginTop={1}>
-          <Text dimColor italic>
-            no tool calls yet — model is thinking…
-          </Text>
-        </Box>
-      ) : (
-        toolCalls.map((rec, i) => (
-          <ToolCallCard key={rec.id} record={rec} index={i + 1} />
-        ))
-      )}
-    </Box>
+    <Text>
+      <Text color={color}>{glyph} </Text>
+      <Text color={color}>{record.name}</Text>
+      <Text dimColor>{tail}</Text>
+    </Text>
   );
 }
 
@@ -318,55 +290,56 @@ function ToolCallCard({
   const out = outputSummary(record.output);
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      {/* Header line: glyph · #N · name · step · duration · status */}
+    <Box
+      flexDirection="column"
+      marginY={0}
+      borderStyle="round"
+      borderColor={color}
+      paddingX={1}
+    >
+      {/* Header */}
       <Box>
         <Text color={color} bold>
-          {glyph} {String(index).padStart(2, " ")}{" "}
-        </Text>
-        <Text bold color={color}>
-          {record.name}
+          {glyph} {String(index).padStart(2, " ")} {record.name}
         </Text>
         <Text dimColor>
           {"  "}step {record.step} · {duration} · {record.status}
         </Text>
       </Box>
 
-      {/* Input block */}
-      <Box flexDirection="column" marginLeft={3}>
-        <Text dimColor>┌ input</Text>
-        <Box marginLeft={2} flexDirection="column">
-          <Text>{prettyJson(record.input)}</Text>
-        </Box>
-
-        {/* Output / error / denied */}
-        {record.status === "ok" ? (
-          <>
-            <Text dimColor>
-              └ output{out.meta ? `  (${out.meta})` : ""}
-            </Text>
-            <Box marginLeft={2} flexDirection="column">
-              <Text color="green">{out.preview}</Text>
-            </Box>
-          </>
-        ) : record.status === "error" ? (
-          <>
-            <Text dimColor>└ error</Text>
-            <Box marginLeft={2}>
-              <Text color="red">{record.errorMessage ?? "(no message)"}</Text>
-            </Box>
-          </>
-        ) : record.status === "denied" ? (
-          <>
-            <Text dimColor>└ result</Text>
-            <Box marginLeft={2}>
-              <Text color="yellow">denied by user</Text>
-            </Box>
-          </>
-        ) : (
-          <Text dimColor>└ awaiting result…</Text>
-        )}
+      {/* Input */}
+      <Text dimColor>┌ input</Text>
+      <Box marginLeft={2} flexDirection="column">
+        <Text>{prettyJson(record.input)}</Text>
       </Box>
+
+      {/* Result */}
+      {record.status === "ok" ? (
+        <>
+          <Text dimColor>
+            └ output{out.meta ? `  (${out.meta})` : ""}
+          </Text>
+          <Box marginLeft={2}>
+            <Text color="green">{out.preview}</Text>
+          </Box>
+        </>
+      ) : record.status === "error" ? (
+        <>
+          <Text dimColor>└ error</Text>
+          <Box marginLeft={2}>
+            <Text color="red">{record.errorMessage ?? "(no message)"}</Text>
+          </Box>
+        </>
+      ) : record.status === "denied" ? (
+        <>
+          <Text dimColor>└ result</Text>
+          <Box marginLeft={2}>
+            <Text color="yellow">denied by user</Text>
+          </Box>
+        </>
+      ) : (
+        <Text dimColor>└ awaiting result…</Text>
+      )}
     </Box>
   );
 }
@@ -384,7 +357,9 @@ function Footer({
     return (
       <Box marginTop={1} flexDirection="column">
         <Text color="red">✗ {status.error}</Text>
-        <Text dimColor>Ctrl+O · {verbose ? "hide" : "show"} verbose · {toolCount} tool calls</Text>
+        <Text dimColor>
+          Ctrl+O · {verbose ? "collapse" : "expand"} tool details · {toolCount} tool calls
+        </Text>
       </Box>
     );
   }
@@ -412,7 +387,7 @@ function Footer({
         </Text>
       </Box>
       <Text dimColor>
-        Ctrl+O · {verbose ? "hide" : "show"} verbose · {toolCount} tool calls
+        Ctrl+O · {verbose ? "collapse" : "expand"} tool details · {toolCount} tool calls
       </Text>
     </Box>
   );
@@ -420,8 +395,8 @@ function Footer({
 
 function handleEvent(
   ev: AgentEvent,
-  append: (line: Omit<LogLine, "id">) => void,
-  upsertToolCall: (
+  append: (item: Omit<StreamItem, "id">) => void,
+  upsertTool: (
     id: string,
     patch: Partial<ToolCallRecord> & Pick<ToolCallRecord, "name">,
   ) => void,
@@ -435,31 +410,24 @@ function handleEvent(
     case "text":
       append({ kind: "text", text: ev.text });
       break;
-    case "tool_call": {
-      const preview = chipPreview(ev.name, ev.input);
-      append({
-        kind: "tool",
-        text: preview ? `◌ ${ev.name}  ${preview}` : `◌ ${ev.name}`,
-      });
-      upsertToolCall(ev.id, {
+    case "tool_call":
+      // One item per tool_use; ToolCallChip / ToolCallCard reads the live record.
+      append({ kind: "tool", toolId: ev.id });
+      upsertTool(ev.id, {
         name: ev.name,
         input: ev.input,
         status: "pending",
         startedAt: Date.now(),
       });
       break;
-    }
     case "tool_result":
-      append({ kind: "tool_result", text: `✓ ${ev.name}` });
-      upsertToolCall(ev.id, { name: ev.name, output: ev.output, status: "ok" });
+      upsertTool(ev.id, { name: ev.name, output: ev.output, status: "ok" });
       break;
     case "tool_error":
-      append({ kind: "tool_error", text: `✗ ${ev.name}  ${ev.message}` });
-      upsertToolCall(ev.id, { name: ev.name, errorMessage: ev.message, status: "error" });
+      upsertTool(ev.id, { name: ev.name, errorMessage: ev.message, status: "error" });
       break;
     case "tool_denied":
-      append({ kind: "tool_denied", text: `⊘ ${ev.name}  denied` });
-      upsertToolCall(ev.id, { name: ev.name, status: "denied" });
+      upsertTool(ev.id, { name: ev.name, status: "denied" });
       break;
     case "usage":
       setStatus((s) => ({
