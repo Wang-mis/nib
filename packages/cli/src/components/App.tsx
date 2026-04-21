@@ -4,12 +4,34 @@
 // call in-place into a full card with input + output + duration.
 import React, { useEffect, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
+import { marked } from "marked";
+import { markedTerminal } from "marked-terminal";
 import {
   defaultRegistry,
   runAgent,
   type AgentEvent,
   type AgentLimits,
 } from "@nib/core";
+
+// Configure marked once with the terminal renderer (ANSI colors via chalk).
+marked.use(
+  markedTerminal({
+    reflowText: false,
+    width: Math.min(process.stdout.columns ?? 100, 120),
+    tab: 2,
+  }) as Parameters<typeof marked.use>[0],
+);
+
+function renderMarkdown(src: string): string {
+  try {
+    const out = marked.parse(src, { async: false }) as string;
+    // marked-terminal often appends a trailing newline; strip it so Ink's
+    // <Text> doesn't add an extra blank line under each chunk.
+    return out.replace(/\n+$/, "");
+  } catch {
+    return src;
+  }
+}
 
 interface AppProps {
   prompt: string;
@@ -225,11 +247,7 @@ export function App({ prompt, autoApprove, limits }: AppProps): React.JSX.Elemen
           );
         }
         if (item.kind === "text") {
-          return (
-            <Text key={item.id} color="white">
-              {item.text}
-            </Text>
-          );
+          return <Text key={item.id}>{renderMarkdown(item.text)}</Text>;
         }
         if (item.kind === "error") {
           return (
