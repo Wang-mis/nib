@@ -55,21 +55,35 @@ async function execute(input: BashInput, ctx: ToolContext): Promise<BashOutput> 
   ctx.signal?.addEventListener("abort", onAbort, { once: true });
 
   let timedOut = false;
+  const proc = Bun.spawn({
+    cmd: [...shell, input.command],
+    cwd,
+    env: ctx.env as Record<string, string> | undefined,
+    stdout: "pipe",
+    stderr: "pipe",
+    signal: controller.signal,
+  });
+
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
+    try {
+      proc.kill();
+    } catch {
+      // process may have already exited
+    }
   }, timeout);
 
-  try {
-    const proc = Bun.spawn({
-      cmd: [...shell, input.command],
-      cwd,
-      env: ctx.env as Record<string, string> | undefined,
-      stdout: "pipe",
-      stderr: "pipe",
-      signal: controller.signal,
-    });
+  const killOnAbort = (): void => {
+    try {
+      proc.kill();
+    } catch {
+      // process may have already exited
+    }
+  };
+  ctx.signal?.addEventListener("abort", killOnAbort, { once: true });
 
+  try {
     const [stdoutText, stderrText, exitCode] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
@@ -85,6 +99,7 @@ async function execute(input: BashInput, ctx: ToolContext): Promise<BashOutput> 
   } finally {
     clearTimeout(timer);
     ctx.signal?.removeEventListener("abort", onAbort);
+    ctx.signal?.removeEventListener("abort", killOnAbort);
   }
 }
 

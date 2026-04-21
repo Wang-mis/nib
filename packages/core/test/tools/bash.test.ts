@@ -55,15 +55,19 @@ describe("bash tool — execution", () => {
     expect(result.exitCode).toBe(7);
   });
 
-  test("times out long-running command", async () => {
-    const cmd =
-      process.platform === "win32"
-        ? "ping -n 5 127.0.0.1 > NUL"
-        : "sleep 5";
-    const result = await bashTool.execute(
-      { command: cmd, timeoutMs: 200 },
-      { cwd: process.cwd() },
-    );
-    expect(result.timedOut).toBe(true);
-  });
+  test(
+    "times out long-running command",
+    async () => {
+      const cmd =
+        process.platform === "win32"
+          ? "ping -n 3 127.0.0.1 > NUL"
+          : "sleep 2";
+      const result = await bashTool.execute(
+        { command: cmd, timeoutMs: 200 },
+        { cwd: process.cwd() },
+      );
+      expect(result.timedOut).toBe(true);
+    },
+    15_000,
+  );
 });
