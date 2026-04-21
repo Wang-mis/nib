@@ -12,6 +12,11 @@
   },
   "dependencies": {
     "@nib/core": "workspace:*",
-    "@nib/shared": "workspace:*"
+    "@nib/shared": "workspace:*",
+    "ink": "^7.0.1",
+    "react": "^19.2.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14"
   }
 }

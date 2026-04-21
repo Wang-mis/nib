@@ -34,12 +34,18 @@
 - 单元测试覆盖每个工具（46 个测试，含安全策略 / 超时 / 危险命令检测） ✅
 - 不可变 `ToolRegistry`（`from` / `withTool` / `dispatch` + 输入校验）
 
-### Sprint 2：Agent Loop + TUI
-- ReAct loop（带 tool_use / tool_result 多轮）
-- Ink TUI 骨架：输入框 + 消息流 + 流式渲染
-- 步数上限 / token 计数 / 成本统计
+### Sprint 2：Agent Loop + TUI ✅ (2026-04-21)
+- ReAct loop（带 tool_use / tool_result 多轮） ✅
+  - `runAgent()` 返回 `AsyncGenerator<AgentEvent>`，事件：`step_start` / `text` / `tool_call` / `tool_result` / `tool_error` / `tool_denied` / `usage` / `done` / `error`
+  - 可注入 `client` 进行测试（`AgentClient` 接口与 SDK 解耦）
+  - 用户审批钩子 `approve(name, input, isDangerous)`，`--yes` 自动通过
+- Ink TUI 骨架：消息流 + 工具调用着色 + 流式渲染 + footer 实时统计 ✅
+- 步数上限 / token 计数 / 成本统计 ✅（PRD §6.3）
+  - 默认：steps=10，tokens=100k，cost=$1.00，per-call timeout=120s
+  - 内置 Anthropic 定价表（haiku/sonnet/opus）+ 子串回退
+- 31 个新单测（agent loop / pricing / schema / parseArgs），总 77 个测试
 
-**验收**：`nib "在 README 末尾加一行 Hello"` 能正确执行。
+**验收**：`nib "在 README 末尾加一行 Hello"` 可读取/写入/确认。
 **Tag**: `v0.1-mvp`
 
 ---
