@@ -48,6 +48,19 @@
 **验收**：`nib "在 README 末尾加一行 Hello"` 可读取/写入/确认。
 **Tag**: `v0.1-mvp`
 
+### Sprint 2.5：REPL + UX 打磨 ✅ (2026-04-23)
+- REPL 多轮对话 ✅
+  - `runAgent` 接受 `messages: readonly Message[]` 历史，`done` 事件回传完整 `messages`
+  - `prompt` 改为可选；裸 `nib` 直接进 REPL，`nib "..."` 跑一轮再进 REPL
+  - 斜杠命令：`/exit` / `/quit` / `/clear`
+  - `Ctrl+C` / `Ctrl+D` 退出
+- TUI 改进 ✅
+  - 工具调用 chip 默认折叠（`◌ name  preview`），`Ctrl+O` 切换为带 input/output 的卡片
+  - assistant 文本块用 `marked` + `marked-terminal` 渲染为 ANSI 着色 markdown
+  - 底部 `›` 输入框，状态行 `○ idle / ● running / ✓ done / ! limit_*`
+
+**验收**：`nib` 进入 REPL，多轮接续上下文，`Ctrl+O` 即可看每个工具调用的完整 input/output。
+
 ---
 
 ## Phase 2 — 可用编辑体验 (Week 3–4)

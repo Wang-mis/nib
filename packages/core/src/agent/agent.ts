@@ -26,7 +26,10 @@ export const DEFAULT_LIMITS: AgentLimits = Object.freeze({
 });
 
 export interface RunOptions {
-  readonly prompt: string;
+  /** Convenience: a single user-turn appended after `messages`. Optional if `messages` is set. */
+  readonly prompt?: string;
+  /** Prior conversation messages (REPL history). Defaults to []. */
+  readonly messages?: readonly Message[];
   readonly registry: ToolRegistry;
   readonly cwd?: string;
   readonly role?: ModelRole;
@@ -66,7 +69,7 @@ export type AgentEvent =
   | { kind: "tool_error"; id: string; name: string; message: string }
   | { kind: "tool_denied"; id: string; name: string }
   | { kind: "usage"; inputTokens: number; outputTokens: number; cumulativeUSD: number }
-  | { kind: "done"; reason: "stop" | "limit_steps" | "limit_tokens" | "limit_cost" | "aborted" }
+  | { kind: "done"; reason: "stop" | "limit_steps" | "limit_tokens" | "limit_cost" | "aborted"; messages: readonly Message[] }
   | { kind: "error"; message: string };
 
 interface ToolUseBlock {
@@ -96,6 +99,8 @@ interface UserMessage {
 }
 
 type Message = AssistantMessage | UserMessage;
+
+export type { Message };
 
 function defaultApprove(): Promise<boolean> {
   return Promise.resolve(true);
@@ -143,7 +148,14 @@ export async function* runAgent(opts: RunOptions): AsyncGenerator<AgentEvent> {
   const model = resolveModel({ role: opts.role, modelOverride: opts.model });
   const tools = buildToolDefs(opts.registry);
 
-  const messages: Message[] = [{ role: "user", content: opts.prompt } as UserMessage];
+  const messages: Message[] = [...(opts.messages ?? [])];
+  if (opts.prompt !== undefined && opts.prompt !== "") {
+    messages.push({ role: "user", content: opts.prompt } as UserMessage);
+  }
+  if (messages.length === 0) {
+    yield { kind: "error", message: "runAgent: provide either `prompt` or non-empty `messages`" };
+    return;
+  }
 
   let totalInput = 0;
   let totalOutput = 0;
@@ -153,7 +165,7 @@ export async function* runAgent(opts: RunOptions): AsyncGenerator<AgentEvent> {
 
   for (let step = 1; step <= limits.maxSteps; step++) {
     if (opts.signal?.aborted) {
-      yield { kind: "done", reason: "aborted" };
+      yield { kind: "done", reason: "aborted", messages };
       return;
     }
     yield { kind: "step_start", step };
@@ -171,7 +183,7 @@ export async function* runAgent(opts: RunOptions): AsyncGenerator<AgentEvent> {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (opts.signal?.aborted) {
-        yield { kind: "done", reason: "aborted" };
+        yield { kind: "done", reason: "aborted", messages };
         return;
       }
       yield { kind: "error", message };
@@ -189,11 +201,11 @@ export async function* runAgent(opts: RunOptions): AsyncGenerator<AgentEvent> {
     };
 
     if (totalInput + totalOutput > limits.maxTokens) {
-      yield { kind: "done", reason: "limit_tokens" };
+      yield { kind: "done", reason: "limit_tokens", messages };
       return;
     }
     if (totalUSD > limits.maxCostUSD) {
-      yield { kind: "done", reason: "limit_cost" };
+      yield { kind: "done", reason: "limit_cost", messages };
       return;
     }
 
@@ -210,7 +222,7 @@ export async function* runAgent(opts: RunOptions): AsyncGenerator<AgentEvent> {
     messages.push({ role: "assistant", content: blocks });
 
     if (response.stop_reason !== "tool_use" || toolUses.length === 0) {
-      yield { kind: "done", reason: "stop" };
+      yield { kind: "done", reason: "stop", messages };
       return;
     }
 
@@ -268,7 +280,7 @@ export async function* runAgent(opts: RunOptions): AsyncGenerator<AgentEvent> {
     messages.push({ role: "user", content: toolResults });
   }
 
-  yield { kind: "done", reason: "limit_steps" };
+  yield { kind: "done", reason: "limit_steps", messages };
 }
 
 function serializeToolOutput(output: unknown): string {

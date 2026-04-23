@@ -1,4 +1,5 @@
 // @nib/cli entry — ReAct agent loop with default tools, rendered via Ink TUI.
+import "./force-color.ts"; // MUST be first — locks chalk to truecolor before any chalk import
 import React from "react";
 import { render } from "ink";
 import {
@@ -14,13 +15,19 @@ import { App } from "./components/App.tsx";
 const HELP = `nib v${VERSION}
 
 Usage:
-  nib "<prompt>"                Run the agent with default tools (read_file,
-                                write_file, bash, glob). Renders via Ink TUI.
-  nib --yes "<prompt>"          Auto-approve all tool calls (DANGEROUS).
-  nib --max-steps N "<prompt>"  Override step cap (default ${DEFAULT_LIMITS.maxSteps}).
+  nib                           Start an interactive REPL.
+  nib "<prompt>"                Run one turn with the prompt, then drop into REPL.
+  nib --yes ...                 Auto-approve all tool calls (DANGEROUS).
+  nib --max-steps N ...         Override step cap (default ${DEFAULT_LIMITS.maxSteps}).
   nib --help | -h               Show this help
   nib --version | -v            Show version
   nib --models                  Show role → model mapping (after env resolution)
+
+REPL commands:
+  /exit | /quit                 Leave the session
+  /clear                        Reset conversation history
+  Ctrl+O                        Toggle verbose tool-call cards
+  Ctrl+C | Ctrl+D               Exit
 
 Environment:
   ANTHROPIC_API_KEY             Required. Your Anthropic API key.
@@ -118,10 +125,6 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (args.models) {
     printModels();
     return 0;
-  }
-  if (!args.prompt) {
-    process.stdout.write(HELP);
-    return 1;
   }
 
   return runTui(args);

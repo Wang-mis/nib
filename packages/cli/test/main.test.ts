@@ -81,16 +81,6 @@ describe("@nib/cli main()", () => {
     }
   });
 
-  it("exits 1 with no args", async () => {
-    const out = captureStdout();
-    try {
-      const code = await main([]);
-      expect(code).toBe(1);
-    } finally {
-      out.restore();
-    }
-  });
-
   it("prints models map with --models", async () => {
     process.env["NIB_MODEL_HAIKU"] = "my-haiku";
     const out = captureStdout();

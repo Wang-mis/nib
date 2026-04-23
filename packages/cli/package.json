@@ -14,7 +14,7 @@
     "@nib/core": "workspace:*",
     "@nib/shared": "workspace:*",
     "ink": "^7.0.1",
-    "marked": "^18.0.2",
+    "marked": "^15.0.7",
     "marked-terminal": "^7.3.0",
     "react": "^19.2.5"
   },

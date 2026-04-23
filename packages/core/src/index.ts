@@ -47,4 +47,4 @@ export type {
 
 // Agent (Phase 1 Sprint 2)
 export { runAgent, DEFAULT_LIMITS, estimateCostUSD, zodToJSONSchema } from "./agent/index.ts";
-export type { AgentEvent, AgentLimits, RunOptions } from "./agent/index.ts";
+export type { AgentEvent, AgentLimits, RunOptions, Message } from "./agent/index.ts";
