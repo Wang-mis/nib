@@ -24,10 +24,12 @@ export {
   ToolValidationError,
   readFileTool,
   writeFileTool,
+  editFileTool,
   bashTool,
   globTool,
   readFileSchema,
   writeFileSchema,
+  editFileSchema,
   bashSchema,
   globSchema,
 } from "./tools/index.ts";
@@ -39,6 +41,8 @@ export type {
   ReadFileOutput,
   WriteFileInput,
   WriteFileOutput,
+  EditFileInput,
+  EditFileOutput,
   BashInput,
   BashOutput,
   GlobInput,
@@ -48,3 +52,13 @@ export type {
 // Agent (Phase 1 Sprint 2)
 export { runAgent, DEFAULT_LIMITS, estimateCostUSD, zodToJSONSchema } from "./agent/index.ts";
 export type { AgentEvent, AgentLimits, RunOptions, Message } from "./agent/index.ts";
+
+// Diff (Phase 2 Sprint 3)
+export { unifiedDiff } from "./diff/index.ts";
+export type {
+  DiffLine,
+  DiffOp,
+  DiffHunk,
+  UnifiedDiff,
+  UnifiedDiffOptions,
+} from "./diff/index.ts";

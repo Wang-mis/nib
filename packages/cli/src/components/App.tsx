@@ -1,7 +1,7 @@
 // Ink TUI app — Phase 1 Sprint 2 + minimal REPL.
-// Renders the agent event stream inline. Each tool call is shown as a compact
-// chip by default (◌/✓/✗/⊘ name  preview); pressing Ctrl+O expands every tool
-// call in-place into a full card with input + output + duration.
+// Renders the agent event stream inline. Each tool call is always rendered as
+// a full card with input + output + duration. There is no chip/card toggle —
+// detailed info is the only mode.
 //
 // REPL: after each turn finishes, returns to a prompt where the user can type
 // another message. Conversation history is threaded through `runAgent` via the
@@ -14,11 +14,16 @@ import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
 import {
   defaultRegistry,
+  resolveModel,
   runAgent,
+  unifiedDiff,
   VERSION,
   type AgentEvent,
   type AgentLimits,
+  type DiffHunk,
+  type DiffLine,
   type Message,
+  type UnifiedDiff,
 } from "@nib/core";
 
 // Configure marked once with the terminal renderer (ANSI colors via chalk).
@@ -110,30 +115,6 @@ function colorForStatus(status: ToolCallRecord["status"]): string {
   }
 }
 
-function chipPreview(name: string, input: unknown): string {
-  if (input === null || typeof input !== "object") return "";
-  const obj = input as Record<string, unknown>;
-  const candidates: Record<string, readonly string[]> = {
-    read_file: ["path"],
-    write_file: ["path"],
-    bash: ["command"],
-    glob: ["pattern"],
-  };
-  const keys = candidates[name] ?? Object.keys(obj).slice(0, 1);
-  for (const key of keys) {
-    const val = obj[key];
-    if (typeof val === "string" && val.length > 0) {
-      return truncate(val, 80);
-    }
-  }
-  return "";
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + "…";
-}
-
 function prettyJson(v: unknown): string {
   if (v === undefined) return "(none)";
   try {
@@ -141,6 +122,43 @@ function prettyJson(v: unknown): string {
   } catch {
     return String(v);
   }
+}
+
+/**
+ * Format JSON-ish value with one property per line. Each value is stringified
+ * inline and truncated to `maxValueLen` chars to keep tool cards compact.
+ * Wrapped in a fenced code block (```json) so markdown renderers (or just
+ * stylistic alignment) display it as a code section.
+ */
+function formatJsonCompact(v: unknown, maxValueLen = 100): string {
+  const lines: string[] = ["```json"];
+  if (v === undefined || v === null) {
+    lines.push(String(v ?? "(none)"));
+  } else if (typeof v !== "object") {
+    lines.push(truncateOneLine(JSON.stringify(v), maxValueLen));
+  } else if (Array.isArray(v)) {
+    lines.push("[");
+    for (const item of v) {
+      lines.push("  " + truncateOneLine(JSON.stringify(item), maxValueLen) + ",");
+    }
+    lines.push("]");
+  } else {
+    lines.push("{");
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      const valStr = truncateOneLine(JSON.stringify(val), maxValueLen);
+      lines.push(`  ${JSON.stringify(k)}: ${valStr},`);
+    }
+    lines.push("}");
+  }
+  lines.push("```");
+  return lines.join("\n");
+}
+
+function truncateOneLine(s: string | undefined, max: number): string {
+  if (s === undefined) return "undefined";
+  // Collapse newlines so each property stays on one line.
+  const flat = s.replace(/\s*\n\s*/g, " ");
+  return flat.length > max ? flat.slice(0, max - 1) + "…" : flat;
 }
 
 function outputSummary(v: unknown): { preview: string; meta?: string } {
@@ -183,14 +201,12 @@ export function App({ prompt, autoApprove, limits }: AppProps): React.JSX.Elemen
   const [items, setItems] = useState<readonly StreamItem[]>([]);
   const [toolsById, setToolsById] = useState<Readonly<Record<string, ToolCallRecord>>>({});
   const [status, setStatus] = useState<Status>(INITIAL_STATUS);
-  const [verbose, setVerbose] = useState(false);
   const [messages, setMessages] = useState<readonly Message[]>([]);
   const [running, setRunning] = useState(false);
   const [draft, setDraft] = useState("");
   const [turn, setTurn] = useState(0);
   const [pendingPrompt, setPendingPrompt] = useState<string>(prompt);
   const [spinnerTick, setSpinnerTick] = useState(0);
-  const [cursorOn, setCursorOn] = useState(true);
 
   // Spinner ticker — runs only when `running`.
   useEffect(() => {
@@ -199,18 +215,7 @@ export function App({ prompt, autoApprove, limits }: AppProps): React.JSX.Elemen
     return () => clearInterval(id);
   }, [running]);
 
-  // Cursor blink — runs only when idle (input visible).
-  useEffect(() => {
-    if (running) return;
-    const id = setInterval(() => setCursorOn((c) => !c), 500);
-    return () => clearInterval(id);
-  }, [running]);
-
   useInput((input, key) => {
-    if (key.ctrl && (input === "o" || input === "O")) {
-      setVerbose((v) => !v);
-      return;
-    }
     if (running) return;
     if (key.return) {
       const text = draft.trim();
@@ -330,11 +335,10 @@ export function App({ prompt, autoApprove, limits }: AppProps): React.JSX.Elemen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Split items into a "settled" prefix (never re-renders) and a "live" suffix
-  // (still updating — only pending tool calls qualify). The settled prefix is
-  // handed to Ink's <Static>, which prints each item exactly once and lets the
-  // terminal scrollback own it. Without this, every spinner/cursor tick repaints
-  // the whole transcript and Ink yanks the viewport back to the top of its frame.
+  // Inline mode: completed tools settle into <Static>, which writes them to
+  // terminal scrollback exactly once and never re-renders them. This is what
+  // lets the mouse wheel work normally — Ink isn't fighting the terminal for
+  // the screen. A tool only settles after it's *finished* (status !== pending).
   let committedCount = 0;
   for (const it of items) {
     if (it.kind === "tool") {
@@ -343,32 +347,49 @@ export function App({ prompt, autoApprove, limits }: AppProps): React.JSX.Elemen
     }
     committedCount++;
   }
-  const settled = items.slice(0, committedCount);
+  const settledRaw = items.slice(0, committedCount);
   const live = items.slice(committedCount);
 
-  // Tool index must be assigned in original order so chips/cards keep their
-  // numbering even after migration to <Static>.
-  const toolIndexById = new Map<number, number>();
+  // Pre-filter trailing/consecutive `step` dividers from the settled stream.
+  // `<Static>` doesn't expose an index callback, so we drop dividers here
+  // whenever the next item is also a `step` or there is no next item.
+  const settled: StreamItem[] = [];
+  for (let i = 0; i < settledRaw.length; i++) {
+    const it = settledRaw[i];
+    if (!it) continue;
+    if (it.kind === "step") {
+      const next = settledRaw[i + 1] ?? live[0];
+      if (!next || next.kind === "step") continue;
+    }
+    settled.push(it);
+  }
+
+  // Tool index must be assigned in original order so cards keep their
+  // numbering across re-renders.
+  const toolIndexById = new Map<string, number>();
   let runningIdx = 0;
   for (const it of items) {
     if (it.kind === "tool") {
       runningIdx++;
-      toolIndexById.set(it.id, runningIdx);
+      toolIndexById.set(it.toolId, runningIdx);
     }
   }
 
-  const renderItem = (item: StreamItem): React.JSX.Element | null => {
+  const renderItem = (item: StreamItem, idxInList?: number, list?: readonly StreamItem[]): React.JSX.Element | null => {
     if (item.kind === "tool") {
       const rec = toolsById[item.toolId];
       if (!rec) return null;
-      const idx = toolIndexById.get(item.id) ?? 0;
-      return verbose ? (
-        <ToolCallCard key={item.id} record={rec} index={idx} />
-      ) : (
-        <ToolCallChip key={item.id} record={rec} />
-      );
+      const idx = toolIndexById.get(item.toolId) ?? 0;
+      return <ToolCallCard key={item.id} record={rec} index={idx} />;
     }
     if (item.kind === "step") {
+      // Suppress step dividers that have no content after them yet, or that
+      // immediately follow another step divider. The divider only appears
+      // once real output for the new step lands.
+      if (list && idxInList !== undefined) {
+        const next = list[idxInList + 1];
+        if (!next || next.kind === "step") return null;
+      }
       return <StepDivider key={item.id} step={item.step} />;
     }
     if (item.kind === "text") {
@@ -395,52 +416,92 @@ export function App({ prompt, autoApprove, limits }: AppProps): React.JSX.Elemen
           )
         }
       </Static>
-      {live.map((it) => renderItem(it))}
+      {live.map((it, i) => renderItem(it, i, live))}
       <Footer
         status={status}
-        verbose={verbose}
         toolCount={Object.keys(toolsById).length}
         running={running}
         draft={draft}
         spinnerTick={spinnerTick}
-        cursorOn={cursorOn}
       />
     </Box>
   );
 }
 
 function Banner(): React.JSX.Element {
+  const cols = Math.max(60, Math.min(process.stdout.columns ?? 80, 200));
+  const GOLD = "#E0B872"; // warm muted gold
+  const GOLD_BRIGHT = "#F5C76A"; // amber highlight
+  const model = resolveModel({ role: "main" });
+  const cwd = process.cwd();
+  const cwdShort = cwd.length > 50 ? "…" + cwd.slice(cwd.length - 49) : cwd;
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Text>
-        <Text color="magentaBright" bold>
-          {"  ✒  nib"}
-        </Text>
-        <Text dimColor>{`  v${VERSION} · learning-first claude-code clone`}</Text>
-      </Text>
-      <Text dimColor>
-        {"     "}type your message · /exit · /clear · Ctrl+O for tool details
-      </Text>
+    <Box flexDirection="column" marginBottom={1} width={cols}>
+      <Box
+        borderStyle="round"
+        borderColor={GOLD}
+        paddingX={2}
+        paddingY={0}
+        flexDirection="row"
+        width={cols}
+      >
+        {/* Left: Nib wordmark */}
+        <Box flexDirection="column" flexShrink={0}>
+          <Text color={GOLD_BRIGHT} bold>{"███╗  ██╗ ██╗ ██████╗ "}</Text>
+          <Text color={GOLD_BRIGHT} bold>{"████╗ ██║ ██║ ██╔══██╗"}</Text>
+          <Text color={GOLD_BRIGHT} bold>{"██╔██╗██║ ██║ ██████╔╝"}</Text>
+          <Text color={GOLD_BRIGHT} bold>{"██║╚████║ ██║ ██╔══██╗"}</Text>
+          <Text color={GOLD_BRIGHT} bold>{"██║ ╚███║ ██║ ██████╔╝"}</Text>
+          <Text color={GOLD_BRIGHT} bold>{"╚═╝  ╚══╝ ╚═╝ ╚═════╝ "}</Text>
+        </Box>
+        {/* Vertical separator */}
+        <Box flexDirection="column" marginX={2} flexShrink={0}>
+          <Text color={GOLD} dimColor>{"│"}</Text>
+          <Text color={GOLD} dimColor>{"│"}</Text>
+          <Text color={GOLD} dimColor>{"│"}</Text>
+          <Text color={GOLD} dimColor>{"│"}</Text>
+          <Text color={GOLD} dimColor>{"│"}</Text>
+          <Text color={GOLD} dimColor>{"│"}</Text>
+        </Box>
+        {/* Right: meta info */}
+        <Box flexDirection="column" flexGrow={1}>
+          <Box>
+            <Text color={GOLD_BRIGHT} bold>{"Nib"}</Text>
+            <Text dimColor>{"  learning-first claude-code clone"}</Text>
+          </Box>
+          <Box>
+            <Text color={GOLD}>{"version  "}</Text>
+            <Text>{`v${VERSION}`}</Text>
+          </Box>
+          <Box>
+            <Text color={GOLD}>{"model    "}</Text>
+            <Text>{model}</Text>
+          </Box>
+          <Box>
+            <Text color={GOLD}>{"cwd      "}</Text>
+            <Text dimColor>{cwdShort}</Text>
+          </Box>
+          <Box marginTop={1}>
+            <Text dimColor>{"› type a message  "}</Text>
+            <Text color={GOLD_BRIGHT}>/exit</Text>
+            <Text dimColor>{"  "}</Text>
+            <Text color={GOLD_BRIGHT}>/clear</Text>
+            <Text dimColor>{"  "}</Text>
+            <Text color={GOLD_BRIGHT}>Ctrl+C</Text>
+            <Text dimColor>{" quit"}</Text>
+          </Box>
+        </Box>
+      </Box>
     </Box>
   );
 }
 
-function StepDivider({ step }: { step: number }): React.JSX.Element {
+function StepDivider(_props: { step: number }): React.JSX.Element {
   const cols = Math.max(20, Math.min(process.stdout.columns ?? 80, 200));
-  const label = ` step ${step} `;
-  const remaining = Math.max(2, cols - label.length);
-  const left = Math.floor(remaining / 2);
-  const right = remaining - left;
   return (
     <Box marginTop={1}>
-      <Text color="blueBright" dimColor>
-        {"━".repeat(left)}
-      </Text>
-      <Text color="blueBright" bold>
-        {label}
-      </Text>
-      <Text color="blueBright" dimColor>
-        {"━".repeat(right)}
+      <Text color="#E0B872" dimColor>
+        {"─".repeat(cols)}
       </Text>
     </Box>
   );
@@ -468,32 +529,6 @@ function AssistantText({ text }: { text: string }): React.JSX.Element {
   );
 }
 
-function ToolCallChip({ record }: { record: ToolCallRecord }): React.JSX.Element {
-  const color = colorForStatus(record.status);
-  const glyph = STATUS_GLYPH[record.status];
-  const preview = chipPreview(record.name, record.input);
-  const tail =
-    record.status === "error" && record.errorMessage
-      ? truncate(record.errorMessage, 80)
-      : record.status === "denied"
-        ? "denied"
-        : preview;
-  return (
-    <Text>
-      <Text color={color}>{`  ${glyph} `}</Text>
-      <Text color={color} bold>
-        {record.name}
-      </Text>
-      {tail ? (
-        <>
-          <Text dimColor>{"  "}</Text>
-          <Text dimColor>{tail}</Text>
-        </>
-      ) : null}
-    </Text>
-  );
-}
-
 function ToolCallCard({
   record,
   index,
@@ -508,57 +543,142 @@ function ToolCallCard({
       ? formatDuration(record.finishedAt - record.startedAt)
       : "running…";
   const out = outputSummary(record.output);
+  const diff = computeEditDiff(record);
 
   return (
-    <Box
-      flexDirection="column"
-      marginY={0}
-      borderStyle="round"
-      borderColor={color}
-      paddingX={1}
-    >
+    <Box flexDirection="column" marginTop={1}>
       <Box>
         <Text color={color} bold>
-          {glyph} #{String(index).padStart(2, "0")} {record.name}
+          {glyph} {record.name}
         </Text>
         <Text dimColor>
-          {"  "}step {record.step} · {duration} · {record.status}
+          {"  "}#{String(index).padStart(2, "0")} · {duration} · {record.status}
         </Text>
       </Box>
 
-      <Text dimColor>┌ input</Text>
       <Box marginLeft={2} flexDirection="column">
-        <Text>{prettyJson(record.input)}</Text>
-      </Box>
+        <Text dimColor>input</Text>
+        <Box marginLeft={2} flexDirection="column">
+          <Text>{renderMarkdown(formatJsonCompact(record.input))}</Text>
+        </Box>
 
-      {record.status === "ok" ? (
-        <>
-          <Text dimColor>
-            └ output{out.meta ? `  (${out.meta})` : ""}
-          </Text>
-          <Box marginLeft={2}>
-            <Text color="green">{out.preview}</Text>
-          </Box>
-        </>
-      ) : record.status === "error" ? (
-        <>
-          <Text dimColor>└ error</Text>
-          <Box marginLeft={2}>
-            <Text color="red">{record.errorMessage ?? "(no message)"}</Text>
-          </Box>
-        </>
-      ) : record.status === "denied" ? (
-        <>
-          <Text dimColor>└ result</Text>
-          <Box marginLeft={2}>
-            <Text color="yellow">denied by user</Text>
-          </Box>
-        </>
-      ) : (
-        <Text dimColor>└ awaiting result…</Text>
-      )}
+        {record.status === "ok" && diff ? (
+          <>
+            <Text dimColor>
+              {`diff  (${diff.added} added, ${diff.removed} removed, ${diff.hunks.length} ${diff.hunks.length === 1 ? "hunk" : "hunks"})`}
+            </Text>
+            <Box marginLeft={2} flexDirection="column">
+              <DiffView diff={diff} />
+            </Box>
+          </>
+        ) : record.status === "ok" ? (
+          <>
+            <Text dimColor>{`output${out.meta ? `  (${out.meta})` : ""}`}</Text>
+            <Box marginLeft={2} flexDirection="column">
+              <Text>{renderMarkdown(formatJsonCompact(record.output))}</Text>
+            </Box>
+          </>
+        ) : record.status === "error" ? (
+          <>
+            <Text dimColor>error</Text>
+            <Box marginLeft={2}>
+              <Text color="red">{record.errorMessage ?? "(no message)"}</Text>
+            </Box>
+          </>
+        ) : record.status === "denied" ? (
+          <>
+            <Text dimColor>result</Text>
+            <Box marginLeft={2}>
+              <Text color="yellow">denied by user</Text>
+            </Box>
+          </>
+        ) : (
+          <Text dimColor>awaiting result…</Text>
+        )}
+      </Box>
     </Box>
   );
+}
+
+function computeEditDiff(record: ToolCallRecord): UnifiedDiff | null {
+  if (record.name !== "edit_file") return null;
+  if (record.status !== "ok") return null;
+  const out = record.output as
+    | { oldContent?: unknown; newContent?: unknown; path?: unknown }
+    | null
+    | undefined;
+  if (!out || typeof out !== "object") return null;
+  const oldContent = typeof out.oldContent === "string" ? out.oldContent : null;
+  const newContent = typeof out.newContent === "string" ? out.newContent : null;
+  const path = typeof out.path === "string" ? out.path : "";
+  if (oldContent === null || newContent === null) return null;
+  return unifiedDiff(oldContent, newContent, path);
+}
+
+function DiffView({ diff }: { diff: UnifiedDiff }): React.JSX.Element {
+  if (diff.hunks.length === 0) {
+    return <Text dimColor>(no changes)</Text>;
+  }
+  return (
+    <Box flexDirection="column">
+      {diff.hunks.map((hunk, i) => (
+        <DiffHunkView key={i} hunk={hunk} index={i} total={diff.hunks.length} />
+      ))}
+    </Box>
+  );
+}
+
+function DiffHunkView({
+  hunk,
+  index,
+  total,
+}: {
+  hunk: DiffHunk;
+  index: number;
+  total: number;
+}): React.JSX.Element {
+  const header = `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`;
+  return (
+    <Box flexDirection="column" marginTop={index === 0 ? 0 : 1}>
+      <Text color="cyan" dimColor>
+        {header}
+        {total > 1 ? `  (hunk ${index + 1}/${total})` : ""}
+      </Text>
+      {hunk.lines.map((line, i) => (
+        <DiffLineView key={i} line={line} />
+      ))}
+    </Box>
+  );
+}
+
+function DiffLineView({ line }: { line: DiffLine }): React.JSX.Element {
+  const oldNum = formatLineNum(line.oldLine);
+  const newNum = formatLineNum(line.newLine);
+  if (line.op === "add") {
+    return (
+      <Text>
+        <Text dimColor>{`${oldNum} ${newNum} `}</Text>
+        <Text color="green">{`+ ${line.text}`}</Text>
+      </Text>
+    );
+  }
+  if (line.op === "remove") {
+    return (
+      <Text>
+        <Text dimColor>{`${oldNum} ${newNum} `}</Text>
+        <Text color="red">{`- ${line.text}`}</Text>
+      </Text>
+    );
+  }
+  return (
+    <Text dimColor>
+      {`${oldNum} ${newNum}   ${line.text}`}
+    </Text>
+  );
+}
+
+function formatLineNum(n: number | null): string {
+  return (n === null ? "" : String(n)).padStart(4, " ");
 }
 
 function StatusPill({
@@ -608,74 +728,81 @@ function StatusPill({
 
 function Footer({
   status,
-  verbose,
   toolCount,
   running,
   draft,
   spinnerTick,
-  cursorOn,
 }: {
   status: Status;
-  verbose: boolean;
   toolCount: number;
   running: boolean;
   draft: string;
   spinnerTick: number;
-  cursorOn: boolean;
 }): React.JSX.Element {
   const total = status.inputTokens + status.outputTokens;
   const cost = status.costUSD.toFixed(4);
+  const cols = Math.max(60, Math.min(process.stdout.columns ?? 80, 200));
+  const GOLD = "#E0B872";
+  const GOLD_BRIGHT = "#F5C76A";
+  const borderColor = status.error ? "red" : GOLD;
 
   return (
-    <Box marginTop={1} flexDirection="column">
-      {/* Status row */}
+    <Box marginTop={1} flexDirection="column" width={cols}>
+      {/* Input box — pinned just above the status bar */}
+      {!running ? (
+        <Box
+          borderStyle="round"
+          borderColor={borderColor}
+          paddingX={1}
+          width={cols}
+        >
+          <Text color={GOLD_BRIGHT} bold>{"› "}</Text>
+          {draft.length > 0 ? (
+            <>
+              <Text>{draft}</Text>
+              <Text color={GOLD_BRIGHT}>{"▎"}</Text>
+            </>
+          ) : (
+            <>
+              <Text color={GOLD_BRIGHT}>{"▎"}</Text>
+              <Text dimColor>{" say something… (Enter to send · /exit to quit)"}</Text>
+            </>
+          )}
+        </Box>
+      ) : (
+        <Box
+          borderStyle="round"
+          borderColor={GOLD}
+          paddingX={1}
+          width={cols}
+        >
+          <Text color={GOLD} dimColor>
+            {SPINNER_FRAMES[spinnerTick % SPINNER_FRAMES.length]}
+          </Text>
+          <Text dimColor>{"  thinking…  press Ctrl+C to interrupt"}</Text>
+        </Box>
+      )}
+
+      {/* Status bar */}
       <Box>
         <StatusPill running={running} status={status} spinnerTick={spinnerTick} />
         <Text dimColor>{"  "}</Text>
-        <Text dimColor>
-          step {status.step} · tokens{" "}
-        </Text>
+        <Text color={GOLD}>step </Text>
+        <Text>{status.step}</Text>
+        <Text dimColor>{"  ·  "}</Text>
+        <Text color={GOLD}>tokens </Text>
         <Text>{total}</Text>
-        <Text dimColor>
-          {" "}(in {status.inputTokens} · out {status.outputTokens}) · ~$
-        </Text>
-        <Text>{cost}</Text>
-        <Text dimColor>{`  ·  ${toolCount} tool calls`}</Text>
+        <Text dimColor>{` (in ${status.inputTokens} · out ${status.outputTokens})  ·  `}</Text>
+        <Text color={GOLD}>cost </Text>
+        <Text>{`$${cost}`}</Text>
+        <Text dimColor>{`  ·  `}</Text>
+        <Text color={GOLD}>tools </Text>
+        <Text>{toolCount}</Text>
       </Box>
 
       {status.error ? (
-        <Box marginTop={0}>
+        <Box>
           <Text color="red">{`  ${status.error}`}</Text>
-        </Box>
-      ) : null}
-
-      {/* Hint row */}
-      <Box>
-        <Text dimColor>
-          {"  "}
-          {verbose ? "Ctrl+O collapse" : "Ctrl+O expand"} · /clear · /exit
-        </Text>
-      </Box>
-
-      {/* Input row — only when idle */}
-      {!running ? (
-        <Box
-          marginTop={1}
-          borderStyle="round"
-          borderColor={status.error ? "red" : "magenta"}
-          paddingX={1}
-        >
-          <Text color="magentaBright" bold>
-            {"› "}
-          </Text>
-          {draft.length > 0 ? (
-            <Text>{draft}</Text>
-          ) : (
-            <Text dimColor>say something… (Enter to send, /exit to quit)</Text>
-          )}
-          {draft.length > 0 ? (
-            <Text color="magentaBright">{cursorOn ? "▎" : " "}</Text>
-          ) : null}
         </Box>
       ) : null}
     </Box>

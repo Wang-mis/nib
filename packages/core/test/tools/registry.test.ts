@@ -18,10 +18,10 @@ const echoTool: Tool<{ message: string }, { echoed: string }> = {
 };
 
 describe("ToolRegistry", () => {
-  test("defaultRegistry contains the 4 sprint-1 tools", () => {
+  test("defaultRegistry contains the MVP tools", () => {
     const reg = defaultRegistry();
     const names = reg.list().map((t) => t.name).sort();
-    expect(names).toEqual(["bash", "glob", "read_file", "write_file"]);
+    expect(names).toEqual(["bash", "edit_file", "glob", "read_file", "write_file"]);
   });
 
   test("rejects duplicate tool names", () => {

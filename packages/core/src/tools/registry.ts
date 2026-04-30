@@ -9,6 +9,7 @@ import {
 } from "./types.ts";
 import { readFileTool } from "./read_file.ts";
 import { writeFileTool } from "./write_file.ts";
+import { editFileTool } from "./edit_file.ts";
 import { bashTool } from "./bash.ts";
 import { globTool } from "./glob.ts";
 
@@ -74,6 +75,7 @@ export function defaultRegistry(): ToolRegistry {
   return ToolRegistry.from([
     readFileTool,
     writeFileTool,
+    editFileTool,
     bashTool,
     globTool,
   ] as readonly AnyTool[]);

@@ -5,6 +5,9 @@ export type { ReadFileInput, ReadFileOutput } from "./read_file.ts";
 export { writeFileTool, writeFileSchema } from "./write_file.ts";
 export type { WriteFileInput, WriteFileOutput } from "./write_file.ts";
 
+export { editFileTool, editFileSchema } from "./edit_file.ts";
+export type { EditFileInput, EditFileOutput } from "./edit_file.ts";
+
 export { bashTool, bashSchema } from "./bash.ts";
 export type { BashInput, BashOutput } from "./bash.ts";
 

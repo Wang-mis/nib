@@ -1,5 +1,6 @@
 // @nib/cli entry — ReAct agent loop with default tools, rendered via Ink TUI.
-import "./force-color.ts"; // MUST be first — locks chalk to truecolor before any chalk import
+import "./load-env.ts"; // MUST be first — loads ~/.nib/.env so subsequent imports see vars
+import "./force-color.ts"; // locks chalk to truecolor before any chalk import
 import React from "react";
 import { render } from "ink";
 import {
@@ -26,15 +27,18 @@ Usage:
 REPL commands:
   /exit | /quit                 Leave the session
   /clear                        Reset conversation history
-  Ctrl+O                        Toggle verbose tool-call cards
   Ctrl+C | Ctrl+D               Exit
 
 Environment:
   ANTHROPIC_API_KEY             Required. Your Anthropic API key.
   ANTHROPIC_BASE_URL            Optional. Override base URL.
+  NIB_HOME                      Optional. Override config dir (default ~/.nib).
 ${MODEL_ROLES.map(
     (r) => `  ${envVarForRole(r).padEnd(22)}  Override '${r}' role model.`,
   ).join("\n")}
+
+Config file:
+  ~/.nib/.env                   Loaded at startup. Shell exports & CWD .env win.
 
 Defaults (per-role models):
 ${MODEL_ROLES.map((r) => `  ${r.padEnd(10)} → ${DEFAULT_MODELS[r]}`).join("\n")}
@@ -96,12 +100,19 @@ function printModels(): void {
 }
 
 async function runTui(args: ParsedArgs): Promise<number> {
+  // Clear the terminal before entering the TUI so the banner appears at the
+  // top of a fresh screen. \x1b[2J wipes the visible viewport, \x1b[3J clears
+  // the scrollback (xterm extension), and \x1b[H homes the cursor.
+  process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
   const instance = render(
     React.createElement(App, {
       prompt: args.prompt,
       autoApprove: args.autoApprove ?? false,
       limits: args.maxSteps ? { maxSteps: args.maxSteps } : undefined,
     }),
+    // Inline mode (no alternateScreen): output flows into the terminal's real
+    // scrollback so the mouse wheel works exactly like in any normal CLI.
+    { incrementalRendering: true },
   );
   await instance.waitUntilExit();
   return 0;
